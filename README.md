@@ -1,6 +1,6 @@
 # Hệ thống Visual Search & Similar Items cho TMĐT Thời trang
 
-**Đồ án môn Kỹ thuật phần mềm**
+**Kỹ thuật phần mềm**
 
 | Thông tin | Nội dung |
 |---|---|
@@ -179,7 +179,7 @@ flowchart LR
 |---|---|
 | Tiền điều kiện | Danh mục đã được lập chỉ mục |
 | Luồng chính | Chọn ảnh + K (tùy chọn) → hệ thống kiểm tra định dạng/dung lượng → chuẩn hóa ảnh, tìm K sản phẩm giống nhất → hiển thị theo độ tương đồng giảm dần |
-| Luồng thay thế | Ảnh sai định dạng/quá dung lượng → báo lỗi. Không có kết quả → thông báo. Có đặt bộ lọc → UC-02 |
+| Luồng thay thế | Ảnh sai định dạng/quá dung lượng → báo lỗi. Không có kết quả → thông báo. Có đặt bộ lọc → lọc áp dụng ngay trong cùng lần tìm kiếm (xem UC-02) |
 | Hậu điều kiện | Danh sách phù hợp hoặc thông báo lỗi/không có kết quả |
 
 ```mermaid
@@ -225,9 +225,10 @@ sequenceDiagram
 
     QT->>WEB: Nhập SKU, tên, danh mục, giá, chọn ảnh
     WEB->>API: POST /admin/items (multipart)
-    API->>API: Kiểm tra SKU, giá, định dạng ảnh
+    API->>API: Kiểm tra SKU, giá, định dạng ảnh (FR-05)
     alt Dữ liệu không hợp lệ
         API-->>WEB: 400 {detail: "..."}
+        WEB-->>QT: Hiển thị lỗi
     else Hợp lệ
         API->>ENC: encode(ảnh)
         ENC-->>API: vector 512 chiều (Fashion-CLIP thật, mục 1.5)
