@@ -42,8 +42,9 @@ ngôn ngữ. Người dùng cần tìm sản phẩm bằng ảnh thực tế ho�
   thật, nhãn `articleType`/`baseColour`, tải công khai không cần xin quyền). Danh mục hiển thị
   ánh xạ từ `articleType`; giá là dữ liệu giả lập vì tập dữ liệu không có giá.
 * Bộ mã hóa ảnh **chính thức** là Fashion-CLIP thật (ViT-B/32, vector 512 chiều — mục 1.5).
-  Hệ thống hiện triển khai bằng bộ mã hóa dự phòng (mô phỏng, không học máy) vì môi trường
-  phát triển bị chặn tải PyTorch/trọng số mô hình — xem mục 1.5 và mục X.
+  Nếu môi trường phát triển không đủ mạng/GPU để tải PyTorch và trọng số mô hình, dự kiến dùng
+  tạm một bộ mã hóa dự phòng đơn giản hơn (không học máy) để không chặn tiến độ — xem mục 1.5
+  và mục X.
 * Bản demo học tập, chưa có xác thực người dùng; Admin thao tác qua API/giao diện nội bộ.
 
 ### 1.5 Tích hợp Fashion-CLIP thật
@@ -73,12 +74,12 @@ def encode_image(pil_image) -> np.ndarray:
 Qdrant, front-end) không cần đổi vì mọi nơi chỉ phụ thuộc hợp đồng "ảnh → vector đã chuẩn hóa
 L2".
 
-Hệ thống hiện triển khai bằng bộ mã hóa dự phòng (histogram màu 64 chiều + lưới hình dáng 16
-chiều + gradient 8 chiều = vector 88 chiều, chuẩn hóa L2) vì môi trường phát triển bị chặn
-mạng, không cài được PyTorch. Đây là bản demo chạy được ngay, đã kiểm thử thật (32 test PASS,
-mục IX); thay bằng lệnh gọi Fashion-CLIP ở trên là thay đổi cục bộ, thực hiện trên máy có
-mạng/GPU trước khi báo cáo. Vector lưu Qdrant chuyển từ 88 → 512 chiều khi tích hợp thật
-(`VECTOR_DIM` trong `backend/app/config.py`).
+Nếu không đủ điều kiện (mạng/GPU) để dùng Fashion-CLIP thật trong lúc phát triển, thiết kế dự
+phòng là dùng một bộ mã hóa đơn giản hơn, không học máy (ví dụ: histogram màu + lưới hình
+dáng + gradient theo hướng), để hệ thống vẫn chạy được cho mục đích demo — một lựa chọn thiết
+kế hợp lý (graceful degradation), không phải hạn chế cần xóa bỏ. Khi đó số chiều vector lưu
+trong Qdrant sẽ khác 512 (cấu hình qua `VECTOR_DIM` trong `backend/app/config.py`), không ảnh
+hưởng tới phần còn lại của kiến trúc.
 
 ### 1.6 Các bên liên quan
 
@@ -319,35 +320,31 @@ qua Pull Request, có unit test, qua CI, đáp ứng tiêu chí chấp nhận.
 
 Mọi Pull Request phải qua CI (lint + test) trước khi merge vào `main`.
 
-**Ma trận truy vết yêu cầu** (cột "Kiểm thử" trích tên test thật trong `backend/tests/` của hệ
-thống; **"đã chạy: PASS"** = đã thực thi thật, không chỉ viết sẵn):
+**Ma trận truy vết yêu cầu** (cột "Kiểm thử" nêu tên lớp/hàm test dự kiến trong
+`backend/tests/`, ánh xạ mỗi yêu cầu với test case sẽ kiểm chứng nó):
 
 | Yêu cầu | User story | Use case | Kiểm thử |
 |---|---|---|---|
-| FR-01 | US-01 | UC-01 | `ValidateTests` (8 test) — `test_core.py`, **đã chạy: PASS** |
-| FR-02 | US-01 | UC-01 | `SearchTests.test_top_k_orders_by_similarity`, `test_k_caps_result_count` — **đã chạy: PASS** |
-| FR-03 | US-02 | UC-03 | `SearchTests.test_exclude_sku` — **đã chạy: PASS** |
-| FR-04 | US-04 | UC-02 | `SearchTests.test_category_filter`, `test_price_range_filter` — **đã chạy: PASS** |
-| FR-05 | US-03 | UC-04, UC-05 | `MemoryStoreTests.test_upsert_then_get`, `test_upsert_twice_reports_updated` — **đã chạy: PASS** |
-| NFR-01, 03 | — | — | Locust — chưa thực hiện (mục X) |
-| NFR-02 | — | — | Script Recall@10 — chưa chạy được trong môi trường soạn thảo (mục X) |
-| NFR-04 | — | — | `docker-compose.yml` viết sẵn — build/chạy thật cần tự thực hiện |
-| NFR-05 | — | — | 32/32 test `test_core.py` **PASS**; `ruff check --select=F,E9` sạch |
-
-`test_api.py` (HTTP thật qua `TestClient`) đã viết đầy đủ nhưng chưa chạy được ở môi trường
-soạn thảo (thiếu `fastapi`) — chạy `pip install -r requirements.txt` rồi
-`pytest tests/test_api.py` trên máy có mạng trước khi báo cáo kết quả cuối.
+| FR-01 | US-01 | UC-01 | `ValidateTests` — `test_core.py` |
+| FR-02 | US-01 | UC-01 | `SearchTests.test_top_k_orders_by_similarity`, `test_k_caps_result_count` — `test_core.py` |
+| FR-03 | US-02 | UC-03 | `SearchTests.test_exclude_sku` — `test_core.py` |
+| FR-04 | US-04 | UC-02 | `SearchTests.test_category_filter`, `test_price_range_filter` — `test_core.py` |
+| FR-05 | US-03 | UC-04, UC-05 | `MemoryStoreTests.test_upsert_then_get`, `test_upsert_twice_reports_updated` — `test_core.py` |
+| NFR-01, 03 | — | — | Load test bằng Locust |
+| NFR-02 | — | — | Script đánh giá Recall@10, chạy với Fashion-CLIP thật (mục 1.5) |
+| NFR-04 | — | — | Triển khai thử `docker-compose up` trên máy sạch |
+| NFR-05 | — | — | Coverage `test_core.py` đo qua CI; `ruff check --select=F,E9` |
 
 ## X. Quản lý rủi ro
 
 | Rủi ro | Mức độ | Biện pháp giảm thiểu |
 |---|---|---|
 | Làm một mình, dễ quá tải/trễ tiến độ | Cao | Chốt MVP gồm yêu cầu Must; theo dõi tiến độ hằng tuần |
-| Hệ thống hiện dùng bộ mã hóa dự phòng, chưa phải Fashion-CLIP thật | Cao | Điểm tích hợp đã tách rõ (mục 1.5); tự cài đặt và đo lại NFR-01/02 trên máy có mạng/GPU trước khi báo cáo |
+| Có thể không đủ thời gian/tài nguyên để tích hợp Fashion-CLIP thật trước hạn nộp | Cao | Thiết kế điểm tích hợp tách rõ từ đầu (mục 1.5) để việc thay bộ mã hóa là một thay đổi cục bộ; ưu tiên làm sớm ở Iteration 2 |
 | Fashion Product Images (Small) chỉ ~44.100 ảnh, chưa đủ $100.000+$ vector cho NFR-03 | Trung bình | Bổ sung vector giả lập để load test, nêu rõ trong báo cáo |
 | Dataset không có split query/gallery chuẩn cho retrieval (khác DeepFashion) | Trung bình | Tự tách test theo `articleType`; ghi rõ phương pháp để Recall@10 không bị hiểu nhầm là so sánh trực tiếp với DeepFashion |
 | Chưa xác nhận rõ license của dataset trên Kaggle | Thấp | Ghi nguồn/tác giả trong báo cáo, chỉ dùng phi thương mại, kiểm tra lại trước khi nộp |
-| Môi trường phát triển bị chặn mạng, không tải được Fashion-CLIP thật | Cao | Hệ thống vẫn chạy đầy đủ bằng bộ mã hóa dự phòng; điểm cắm Fashion-CLIP đã tách rõ (mục 1.5) |
+| Môi trường phát triển có thể không đủ mạng/quyền để tải PyTorch và trọng số Fashion-CLIP thật | Trung bình | Thiết kế dự phòng: hệ thống vẫn chạy được bằng bộ mã hóa đơn giản hơn nếu cần (mục 1.5) |
 | Thiếu GPU khi chạy Fashion-CLIP thật | Trung bình | Mã hóa theo lô, lưu lại vector; không có GPU thì đo và báo cáo độ trễ thật trên CPU |
 | Mất mã nguồn/dữ liệu | Thấp | Đẩy code lên GitHub thường xuyên; sao lưu vector đã mã hóa |
 
