@@ -9,13 +9,6 @@
 | Sinh viên thực hiện | Trần Công Thành Đạt - 23010782 |
 | Mô hình phát triển | Agile cá nhân (Scrum rút gọn, iteration 1 tuần) |
 
-Đề tài nộp thành ba phần độc lập cho ba môn học: **(1) Kỹ thuật phần mềm** (tài liệu này —
-đặc tả, thiết kế, kiểm thử, rủi ro, không kèm mã nguồn); **(2) Xây dựng ứng dụng web** — React
-(Vite) chạy hoàn toàn phía client, bộ mã hóa ảnh mô phỏng bằng Canvas API; **(3) Thiết kế web
-nâng cao** — cùng giao diện với (2), ghép backend FastAPI + Qdrant thật, đóng gói Docker
-Compose. FR/NFR, use case và ma trận truy vết dưới đây áp dụng chung cho (2) và (3), mỗi phần
-chỉ hiện thực phạm vi phù hợp môn học của nó.
-
 ## I. Giới thiệu đề tài
 
 ### 1.1 Bối cảnh và vấn đề
