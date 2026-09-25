@@ -9,6 +9,11 @@
 | Sinh viên thực hiện | Trần Công Thành Đạt - 23010782 |
 | Mô hình phát triển | Agile cá nhân (Scrum rút gọn, iteration 1 tuần) |
 
+Tài liệu này là đặc tả yêu cầu (SRS), thiết kế kiến trúc, kế hoạch kiểm thử và quản lý rủi ro
+cho hệ thống nói trên — không kèm mã nguồn. Hệ thống gồm front-end (React + Vite) và backend
+(FastAPI + Qdrant Vector Database); kiến trúc, FR/NFR, use case và ma trận truy vết ở các mục
+dưới đây mô tả đầy đủ cả hai phần này.
+
 ## I. Giới thiệu đề tài
 
 ### 1.1 Bối cảnh và vấn đề
@@ -37,8 +42,8 @@ ngôn ngữ. Người dùng cần tìm sản phẩm bằng ảnh thực tế ho�
   thật, nhãn `articleType`/`baseColour`, tải công khai không cần xin quyền). Danh mục hiển thị
   ánh xạ từ `articleType`; giá là dữ liệu giả lập vì tập dữ liệu không có giá.
 * Bộ mã hóa ảnh **chính thức** là Fashion-CLIP thật (ViT-B/32, vector 512 chiều — mục 1.5).
-  Mã nguồn nộp kèm (Phần 2, 3) chạy bằng bộ mã hóa dự phòng (mô phỏng, không học máy) vì môi
-  trường soạn thảo bị chặn tải PyTorch/trọng số mô hình — xem mục 1.5 và mục X.
+  Hệ thống hiện triển khai bằng bộ mã hóa dự phòng (mô phỏng, không học máy) vì môi trường
+  phát triển bị chặn tải PyTorch/trọng số mô hình — xem mục 1.5 và mục X.
 * Bản demo học tập, chưa có xác thực người dùng; Admin thao tác qua API/giao diện nội bộ.
 
 ### 1.5 Tích hợp Fashion-CLIP thật
@@ -64,13 +69,14 @@ def encode_image(pil_image) -> np.ndarray:
     return vec / np.linalg.norm(vec)   # chuẩn hóa L2
 ```
 
-Điểm tích hợp chỉ nằm ở `app/core/encoder.py` của backend Phần 3 — phần còn lại (API, Qdrant,
-front-end) không cần đổi vì mọi nơi chỉ phụ thuộc hợp đồng "ảnh → vector đã chuẩn hóa L2".
+Điểm tích hợp chỉ nằm ở hàm mã hóa của backend (`app/core/encoder.py`) — phần còn lại (API,
+Qdrant, front-end) không cần đổi vì mọi nơi chỉ phụ thuộc hợp đồng "ảnh → vector đã chuẩn hóa
+L2".
 
-Mã nguồn nộp kèm vẫn dùng bộ mã hóa dự phòng (histogram màu 64 chiều + lưới hình dáng 16
-chiều + gradient 8 chiều = vector 88 chiều, chuẩn hóa L2) vì môi trường soạn thảo bị chặn
+Hệ thống hiện triển khai bằng bộ mã hóa dự phòng (histogram màu 64 chiều + lưới hình dáng 16
+chiều + gradient 8 chiều = vector 88 chiều, chuẩn hóa L2) vì môi trường phát triển bị chặn
 mạng, không cài được PyTorch. Đây là bản demo chạy được ngay, đã kiểm thử thật (32 test PASS,
-mục IX); thay bằng lệnh gọi Fashion-CLIP ở trên là thay đổi cục bộ, tự làm trên máy có
+mục IX); thay bằng lệnh gọi Fashion-CLIP ở trên là thay đổi cục bộ, thực hiện trên máy có
 mạng/GPU trước khi báo cáo. Vector lưu Qdrant chuyển từ 88 → 512 chiều khi tích hợp thật
 (`VECTOR_DIM` trong `backend/app/config.py`).
 
@@ -91,7 +97,7 @@ flowchart LR
         WEB["Web Demo (React SPA)"]
     end
 
-    subgraph Server["Backend — chỉ có ở bản Full-stack"]
+    subgraph Server["Backend"]
         API["FastAPI<br/>/search/image, /items,<br/>/items/{sku}/similar, /admin/items"]
         ENC["Bộ mã hóa ảnh<br/>(Fashion-CLIP thật — mục 1.5)"]
         API --> ENC
@@ -113,11 +119,7 @@ flowchart LR
 | Bộ mã hóa ảnh | Sinh vector đặc trưng từ ảnh (mục 1.5) |
 | Qdrant | Lưu vector + metadata, tìm ANN bằng HNSW, lọc theo metadata |
 
-Ở bản Front-end, kiến trúc rút gọn còn đúng khối **Web Demo**: front-end tự đảm nhiệm vai trò
-Bộ mã hóa (Canvas API) và Qdrant (tìm kiếm tuyến tính trong bộ nhớ), không có Server/Qdrant
-thật.
-
-**Mô hình dữ liệu (Item)** — khớp `schemas.py` ở bản Full-stack:
+**Mô hình dữ liệu (Item)** — khớp schema API của hệ thống (`schemas.py`):
 
 ```mermaid
 classDiagram
@@ -270,10 +272,10 @@ MoSCoW: **M** = Must, **S** = Should, **C** = Could.
 ## VI. Công cụ và Công nghệ sử dụng
 
 * **AI:** Fashion-CLIP thật (`ViT-B/32`, 512 chiều — chính thức, mục 1.5); bộ mã hóa dự phòng
-  88 chiều (fallback trong mã nguồn nộp kèm).
+  88 chiều (fallback).
 * **Dataset:** Fashion Product Images (Small) (Kaggle, Param Aggarwal, ~44.100 ảnh).
 * **Backend & Storage:** Python 3.11+, FastAPI, Qdrant (chỉ mục HNSW).
-* **Front-end:** React + Vite (dùng chung giữa bản độc lập và bản gọi API thật).
+* **Front-end:** React + Vite.
 * **DevOps:** Docker & Docker Compose.
 * **Quy trình:** Git + GitHub (Pull Request, commit theo quy ước), GitHub Projects (Kanban),
   `pytest`/`httpx`, GitHub Actions (CI), draw.io/PlantUML.
@@ -296,13 +298,13 @@ qua Pull Request, có unit test, qua CI, đáp ứng tiêu chí chấp nhận.
 
 1. Tài liệu đặc tả yêu cầu (SRS) — tài liệu này.
 2. Mô hình UML: Use Case (mục III), Sequence (UC-01, UC-04), ER/Class.
-3. Mã nguồn Front-end (môn Xây dựng ứng dụng web).
-4. Mã nguồn Full-stack + `docker-compose.yml` (môn Thiết kế web nâng cao).
-5. Kế hoạch/báo cáo kiểm thử, ma trận truy vết (mục IX).
-6. Báo cáo Recall@10 và hiệu năng đo với Fashion-CLIP thật; nếu không có mạng/GPU thì báo cáo
+3. Mã nguồn hệ thống — front-end (React + Vite) và backend (FastAPI + Qdrant) — kèm
+   `docker-compose.yml`.
+4. Kế hoạch/báo cáo kiểm thử, ma trận truy vết (mục IX).
+5. Báo cáo Recall@10 và hiệu năng đo với Fashion-CLIP thật; nếu không có mạng/GPU thì báo cáo
    số liệu trên bộ mã hóa dự phòng kèm ghi chú.
-7. Nhật ký dự án: backlog, sprint log, lịch sử commit/PR.
-8. Slide và demo bảo vệ.
+6. Nhật ký dự án: backlog, sprint log, lịch sử commit/PR.
+7. Slide và demo bảo vệ.
 
 ## IX. Kiểm thử và đảm bảo chất lượng
 
@@ -317,8 +319,8 @@ qua Pull Request, có unit test, qua CI, đáp ứng tiêu chí chấp nhận.
 
 Mọi Pull Request phải qua CI (lint + test) trước khi merge vào `main`.
 
-**Ma trận truy vết yêu cầu** (cột "Kiểm thử" trích tên test thật trong `backend/tests/` của
-bản Full-stack; **"đã chạy: PASS"** = đã thực thi thật, không chỉ viết sẵn):
+**Ma trận truy vết yêu cầu** (cột "Kiểm thử" trích tên test thật trong `backend/tests/` của hệ
+thống; **"đã chạy: PASS"** = đã thực thi thật, không chỉ viết sẵn):
 
 | Yêu cầu | User story | Use case | Kiểm thử |
 |---|---|---|---|
@@ -341,11 +343,11 @@ soạn thảo (thiếu `fastapi`) — chạy `pip install -r requirements.txt` r
 | Rủi ro | Mức độ | Biện pháp giảm thiểu |
 |---|---|---|
 | Làm một mình, dễ quá tải/trễ tiến độ | Cao | Chốt MVP gồm yêu cầu Must; theo dõi tiến độ hằng tuần |
-| Mã nguồn nộp kèm dùng bộ mã hóa dự phòng, chưa phải Fashion-CLIP thật | Cao | Điểm tích hợp đã tách rõ (mục 1.5); tự cài đặt và đo lại NFR-01/02 trên máy có mạng/GPU trước khi báo cáo |
+| Hệ thống hiện dùng bộ mã hóa dự phòng, chưa phải Fashion-CLIP thật | Cao | Điểm tích hợp đã tách rõ (mục 1.5); tự cài đặt và đo lại NFR-01/02 trên máy có mạng/GPU trước khi báo cáo |
 | Fashion Product Images (Small) chỉ ~44.100 ảnh, chưa đủ $100.000+$ vector cho NFR-03 | Trung bình | Bổ sung vector giả lập để load test, nêu rõ trong báo cáo |
 | Dataset không có split query/gallery chuẩn cho retrieval (khác DeepFashion) | Trung bình | Tự tách test theo `articleType`; ghi rõ phương pháp để Recall@10 không bị hiểu nhầm là so sánh trực tiếp với DeepFashion |
 | Chưa xác nhận rõ license của dataset trên Kaggle | Thấp | Ghi nguồn/tác giả trong báo cáo, chỉ dùng phi thương mại, kiểm tra lại trước khi nộp |
-| Môi trường soạn thảo bị chặn mạng, không tải được Fashion-CLIP thật | Cao | Mã nguồn nộp kèm vẫn chạy đầy đủ bằng bộ mã hóa dự phòng; điểm cắm Fashion-CLIP đã tách rõ (mục 1.5) |
+| Môi trường phát triển bị chặn mạng, không tải được Fashion-CLIP thật | Cao | Hệ thống vẫn chạy đầy đủ bằng bộ mã hóa dự phòng; điểm cắm Fashion-CLIP đã tách rõ (mục 1.5) |
 | Thiếu GPU khi chạy Fashion-CLIP thật | Trung bình | Mã hóa theo lô, lưu lại vector; không có GPU thì đo và báo cáo độ trễ thật trên CPU |
 | Mất mã nguồn/dữ liệu | Thấp | Đẩy code lên GitHub thường xuyên; sao lưu vector đã mã hóa |
 
@@ -353,7 +355,7 @@ soạn thảo (thiếu `fastapi`) — chạy `pip install -r requirements.txt` r
 
 | Vai trò | Người phụ trách |
 |---|---|
-| Toàn bộ (Product Owner, phân tích, thiết kế, lập trình, kiểm thử) | _(điền họ tên, MSSV)_ — làm cá nhân |
+| Toàn bộ (Product Owner, phân tích, thiết kế, lập trình, kiểm thử) | Trần Công Thành Đạt - 23010782 — làm cá nhân |
 
 ## XII. Tài liệu tham khảo
 
