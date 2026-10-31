@@ -4,12 +4,6 @@ Bản full-stack của đề tài "Visual Search & Similar Items cho TMĐT Thờ
 front-end gọi một backend thật — FastAPI mã hóa ảnh bằng mô hình **Fashion-CLIP**, Qdrant (vector database, chỉ mục HNSW)
 tìm kiếm theo độ tương đồng cosine, SQLite lưu đơn hàng — đóng gói và chạy bằng Docker Compose.
 
-Đây là 1 trong 3 phần nộp riêng cho 3 môn học của cùng một đề tài:
-
-1. **`01-KyThuatPhanMem/`** — tài liệu đặc tả yêu cầu, thiết kế, quy trình (không kèm mã nguồn).
-2. **`02-XayDungUngDungWeb-FrontEnd/`** — React + Vite, chạy hoàn toàn phía client, không backend.
-3. **`03-ThietKeWebNangCao-FullStack/`** (thư mục này) — dùng lại giao diện của phần 2, ghép
-   với backend thật.
 
 ## Có gì mới ở v1.4 — chỉ dùng ảnh thật H&M, ORM, chuẩn bị đo NFR
 
