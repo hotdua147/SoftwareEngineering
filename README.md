@@ -1,368 +1,391 @@
-# Hệ thống Visual Search & Similar Items cho TMĐT Thời trang
+# StyleLens — Thiết kế web nâng cao (Full-stack)
 
-**Kỹ thuật phần mềm**
+Bản full-stack của đề tài "Visual Search & Similar Items cho TMĐT Thời trang": React (Vite) ở
+front-end gọi một backend thật — FastAPI mã hóa ảnh bằng mô hình **Fashion-CLIP**, Qdrant (vector database, chỉ mục HNSW)
+tìm kiếm theo độ tương đồng cosine, SQLite lưu đơn hàng — đóng gói và chạy bằng Docker Compose.
 
-| Thông tin | Nội dung |
-|---|---|
-| Môn học | Kỹ thuật phần mềm |
-| Giảng viên hướng dẫn | Trịnh Thanh Bình |
-| Sinh viên thực hiện | Trần Công Thành Đạt - 23010782 |
-| Mô hình phát triển | Agile cá nhân (Scrum rút gọn, iteration 1 tuần) |
+Đây là 1 trong 3 phần nộp riêng cho 3 môn học của cùng một đề tài:
 
-Tài liệu này là đặc tả yêu cầu (SRS), thiết kế kiến trúc, kế hoạch kiểm thử và quản lý rủi ro
-cho hệ thống nói trên — không kèm mã nguồn. Hệ thống gồm front-end (React + Vite) và backend
-(FastAPI + Qdrant Vector Database); kiến trúc, FR/NFR, use case và ma trận truy vết ở các mục
-dưới đây mô tả đầy đủ cả hai phần này.
+1. **`01-KyThuatPhanMem/`** — tài liệu đặc tả yêu cầu, thiết kế, quy trình (không kèm mã nguồn).
+2. **`02-XayDungUngDungWeb-FrontEnd/`** — React + Vite, chạy hoàn toàn phía client, không backend.
+3. **`03-ThietKeWebNangCao-FullStack/`** (thư mục này) — dùng lại giao diện của phần 2, ghép
+   với backend thật.
 
-## I. Giới thiệu đề tài
+## Có gì mới ở v1.4 — chỉ dùng ảnh thật H&M, ORM, chuẩn bị đo NFR
 
-### 1.1 Bối cảnh và vấn đề
+* Đơn hàng và email nhận tin truy cập SQLite qua **ORM SQLAlchemy 2.0** (`backend/app/store/models.py`:
+  `Order`, `OrderItem`, `OrderHistory`, `NewsletterSubscriber`) thay cho SQL viết tay; giữ nguyên tên
+  bảng/cột nên tệp SQLite cũ vẫn mở được, giao diện `OrderStore` không đổi.
 
-Tìm kiếm bằng từ khóa gặp rào cản trong thời trang vì kiểu dáng, họa tiết khó mô tả bằng
-ngôn ngữ. Người dùng cần tìm sản phẩm bằng ảnh thực tế hoặc ảnh từ mạng xã hội.
+* Bộ script đo yêu cầu phi chức năng trong `backend/nfr/` (Recall@10, bù 100.000 vector, load test
+  Locust) và hướng dẫn chạy từng bước: [`docs/NFR.md`](docs/NFR.md). Duyệt danh mục đọc dữ liệu
+  không kèm ảnh, Qdrant có chỉ mục trên các trường lọc, khóa sắp xếp/tìm theo tên được nhớ lại —
+  để chạy được với 100.000+ sản phẩm.
 
-### 1.2 Mục tiêu
+* Bỏ hẳn ảnh vẽ: backend **không còn tự nạp 25 sản phẩm mẫu vẽ bằng Pillow** lúc khởi động; danh
+  mục chỉ gồm ảnh thật H&M (nạp bằng `python -m app.import_hm`, xem mục dưới) và sản phẩm Admin thêm.
+  Danh mục trống thì log khởi động nhắc lệnh nạp, trang web hiện hướng dẫn thay cho lưới sản phẩm.
+* Front-end bỏ bộ sinh ảnh SVG: slider, ô danh mục, ảnh ghép, khối "Bán chạy" và ảnh mẫu để thử tìm
+  kiếm đều lấy ảnh H&M từ API (`GET /api/v1/items?source=hm&category=…&limit=2`, hook `useShowcase`).
+  Ảnh mẫu đi qua đúng luồng tải ảnh lên như ảnh người dùng chọn.
+* Bộ ảnh vẽ tổng hợp chỉ còn trong kiểm thử (`backend/tests/synthetic_catalog.py`) để test chạy
+  nhanh, tất định, không cần bộ dữ liệu H&M.
+* Nâng cấp từ bản cũ: các SKU `MOCK-…` đã nằm trong Qdrant vẫn còn — xóa bằng
+  `docker-compose down -v` (hoặc xóa collection trong Qdrant dashboard) rồi nạp lại ảnh H&M.
 
-* **Sản phẩm:** hệ thống tìm kiếm bằng ảnh (**Visual Search**) và gợi ý sản phẩm tương tự
-  (**Similar Items**) cho TMĐT thời trang, dùng **Fashion-CLIP** và **Qdrant Vector DB**.
-* **Môn học:** áp dụng quy trình kỹ thuật phần mềm trọn vẹn — đặc tả, thiết kế UML, Agile,
-  kiểm thử tự động, CI/CD, quản lý rủi ro.
+## Có gì mới ở v1.3 — bộ mã hóa Fashion-CLIP thật
 
-### 1.3 Phạm vi
+Ảnh sản phẩm và ảnh tìm kiếm được mã hóa bằng **Fashion-CLIP** (`patrickjohncyh/fashion-clip` —
+CLIP ViT-B/32 tinh chỉnh trên ~800 nghìn ảnh thời trang kèm mô tả; Chia và cộng sự, *Scientific
+Reports*, 2022) thành vector **512 chiều**, thay cho bộ mã hóa mô phỏng 88 chiều (màu, hình dáng,
+họa tiết). Mô hình hiểu kiểu dáng, họa tiết, chất liệu, phong cách — "sản phẩm tương tự" và tìm
+bằng ảnh chụp thật đúng hơn hẳn.
 
-* **In-scope:** tiền xử lý tập dữ liệu Fashion Product Images (Small), RESTful API, Vector
-  DB, Web Demo.
-* **Out-of-scope:** giỏ hàng, thanh toán, vận chuyển, quản lý tài khoản người dùng.
+* `app/core/embedding.py`: interface `ImageEncoder` với 2 cách triển khai — `FashionClipEncoder`
+  (mặc định) và `SimpleEncoder` (bộ cũ, giữ làm dự phòng). Đổi bằng `ENCODER=fashionclip|simple`.
+* Mỗi bộ mã hóa một collection Qdrant riêng (`stylelens_items_fashionclip` / `stylelens_items`)
+  vì vector khác số chiều; khởi động lần đầu với Fashion-CLIP thì **SKU Admin đã thêm ở bản cũ
+  được tự chuyển sang** (mã hóa lại từ ảnh đã lưu).
+* Docker: image `api` cài PyTorch bản CPU + transformers và **tải sẵn mô hình lúc build** — chạy
+  không cần mạng. Cần ~2 GB dung lượng image, ~1,5 GB RAM; mã hóa một ảnh ~0,1–0,3 s trên CPU.
+* Header trang web hiển thị bộ mã hóa backend đang dùng (đọc từ `GET /health`).
 
-### 1.4 Ràng buộc và giả định
+## Có gì mới ở v1.2 (2 sprint sau khi ghép bản 02)
 
-* Làm cá nhân trong thời gian học phần → phạm vi quản lý theo MoSCoW (mục IV), chỉ **Must**
-  là bắt buộc.
-* Dữ liệu chính: **Fashion Product Images (Small)** (Kaggle, Param Aggarwal — ~44.100 ảnh
-  thật, nhãn `articleType`/`baseColour`, tải công khai không cần xin quyền). Danh mục hiển thị
-  ánh xạ từ `articleType`; giá là dữ liệu giả lập vì tập dữ liệu không có giá.
-* Bộ mã hóa ảnh **chính thức** là Fashion-CLIP thật (ViT-B/32, vector 512 chiều — mục 1.5).
-  Nếu môi trường phát triển không đủ mạng/GPU để tải PyTorch và trọng số mô hình, dự kiến dùng
-  tạm một bộ mã hóa dự phòng đơn giản hơn (không học máy) để không chặn tiến độ — xem mục 1.5
-  và mục X.
-* Bản demo học tập, chưa có xác thực người dùng; Admin thao tác qua API/giao diện nội bộ.
+Nhật ký đầy đủ 5 bước của từng sprint: [`docs/SPRINTS.md`](docs/SPRINTS.md).
 
-### 1.5 Tích hợp Fashion-CLIP thật
+* **PB-10 Đăng nhập quản trị** — mọi API `/api/v1/admin/...` cần token (HMAC, hạn 8 giờ); mật
+  khẩu đặt bằng `ADMIN_PASSWORD` (**mặc định của bản demo: `stylelens-admin`** — phải đổi khi
+  triển khai); sai 5 lần / 15 phút thì tạm khóa.
+* **PB-11 Gợi ý phối đồ** — trang sản phẩm gợi ý món khác loại hợp để mặc cùng (áo → quần, áo
+  khoác; váy → áo khoác…), xếp theo quy tắc phối màu/họa tiết đọc từ ảnh, mỗi món kèm lý do.
+  Bổ sung cho "Sản phẩm tương tự" (món giống nhất).
+* **PB-09 Mã giảm giá** — `GIAM10`, `CHAO50K`, `FREESHIP`; backend kiểm tra mã + điều kiện, tự
+  tính mức giảm; giỏ hàng báo giá qua `POST /orders/quote`.
+* **PB-08 Đã xem gần đây** — ở trang chủ và trang sản phẩm.
 
-| Thuộc tính | Giá trị |
-|---|---|
-| Kiến trúc nền | CLIP ViT-B/32 (`patrickjohncyh/fashion-clip`) |
-| Chiều vector embedding | 512 |
-| Dữ liệu huấn luyện | ~800K sản phẩm thời trang (Farfetch) |
-| Kích thước tải về | ~400–500 MB |
-| Giấy phép | MIT |
-| Kích thước ảnh đầu vào | 224×224 |
+## Có gì mới ở v1.1
 
-```python
-# requirements.txt: fashion-clip, torch
-from fashion_clip.fashion_clip import FashionCLIP
-import numpy as np
+Bản này đồng bộ **toàn bộ giao diện và tính năng mới nhất của bản 02** sang full-stack. Những gì
+bản 02 tự làm trong trình duyệt (localStorage) nay do backend đảm nhiệm:
 
-fclip = FashionCLIP("fashion-clip")
-
-def encode_image(pil_image) -> np.ndarray:
-    vec = fclip.encode_images([pil_image], batch_size=1)[0]
-    return vec / np.linalg.norm(vec)   # chuẩn hóa L2
-```
-
-Điểm tích hợp chỉ nằm ở hàm mã hóa của backend (`app/core/encoder.py`) — phần còn lại (API,
-Qdrant, front-end) không cần đổi vì mọi nơi chỉ phụ thuộc hợp đồng "ảnh → vector đã chuẩn hóa
-L2".
-
-Nếu không đủ điều kiện (mạng/GPU) để dùng Fashion-CLIP thật trong lúc phát triển, thiết kế dự
-phòng là dùng một bộ mã hóa đơn giản hơn, không học máy (ví dụ: histogram màu + lưới hình
-dáng + gradient theo hướng), để hệ thống vẫn chạy được cho mục đích demo — một lựa chọn thiết
-kế hợp lý (graceful degradation), không phải hạn chế cần xóa bỏ. Khi đó số chiều vector lưu
-trong Qdrant sẽ khác 512 (cấu hình qua `VECTOR_DIM` trong `backend/app/config.py`), không ảnh
-hưởng tới phần còn lại của kiến trúc.
-
-### 1.6 Các bên liên quan
-
-| Bên liên quan | Mối quan tâm |
-|---|---|
-| Khách hàng (Shopper) | Tìm đúng sản phẩm nhanh bằng ảnh, xem gợi ý tương tự |
-| Quản trị viên (Admin) | Thêm/cập nhật SKU dễ dàng, dữ liệu tìm kiếm luôn đồng bộ |
-| Giảng viên | Product Owner: nghiệm thu theo tiêu chí mục III–IV |
-| Sinh viên thực hiện | Tự đảm nhiệm mọi vai trò |
-
-## II. Kiến trúc tổng quan
-
-```mermaid
-flowchart LR
-    subgraph Client["Trình duyệt"]
-        WEB["Web Demo (React SPA)"]
-    end
-
-    subgraph Server["Backend"]
-        API["FastAPI<br/>/search/image, /items,<br/>/items/{sku}/similar, /admin/items"]
-        ENC["Bộ mã hóa ảnh<br/>(Fashion-CLIP thật — mục 1.5)"]
-        API --> ENC
-        ENC --> API
-    end
-
-    DB[("Qdrant<br/>HNSW · Cosine")]
-
-    WEB -- "HTTP multipart/JSON" --> API
-    API -- "JSON" --> WEB
-    API -- "upsert / search" --> DB
-    DB -- "kết quả" --> API
-```
-
-| Thành phần | Vai trò |
-|---|---|
-| Web Demo | Upload ảnh, Top-K, bộ lọc giá/danh mục, trang chi tiết + "Sản phẩm tương tự", trang quản trị |
-| API (FastAPI) | Kiểm tra/chuẩn hóa ảnh (FR-01), điều phối mã hóa + truy vấn |
-| Bộ mã hóa ảnh | Sinh vector đặc trưng từ ảnh (mục 1.5) |
-| Qdrant | Lưu vector + metadata, tìm ANN bằng HNSW, lọc theo metadata |
-
-**Mô hình dữ liệu (Item)** — khớp schema API của hệ thống (`schemas.py`):
-
-```mermaid
-classDiagram
-    class Item {
-        +sku : string
-        +name : string
-        +category : string
-        +price : float
-        +image : string
-        +source : string
-        +score : float
-    }
-```
-
-`score` chỉ có khi `Item` là kết quả tìm kiếm/gợi ý. Vector đặc trưng (512 chiều với
-Fashion-CLIP thật, 88 chiều với bộ dự phòng) lưu trong Qdrant, không trả qua API.
-
-## III. Tác nhân và Use Case
-
-**Tác nhân:** Khách hàng, Quản trị viên, Hệ thống (Indexing).
-
-```mermaid
-flowchart LR
-    KH(["Khách hàng"])
-    QT(["Quản trị viên"])
-    HT(["Hệ thống (Indexing)"])
-
-    subgraph UC["Use case"]
-        direction TB
-        UC01(("UC-01<br/>Tìm kiếm bằng ảnh"))
-        UC02(("UC-02<br/>Lọc theo giá/danh mục"))
-        UC03(("UC-03<br/>Xem sản phẩm tương tự"))
-        UC04(("UC-04<br/>Thêm/cập nhật SKU"))
-        UC05(("UC-05<br/>Lập chỉ mục tự động"))
-    end
-
-    KH --- UC01
-    KH --- UC02
-    KH --- UC03
-    QT --- UC04
-    HT --- UC05
-    UC04 -.->|kích hoạt| UC05
-```
-
-| Mã | Use case | Tác nhân chính | FR liên quan |
-|---|---|---|---|
-| UC-01 | Tìm kiếm sản phẩm bằng ảnh | Khách hàng | FR-01, FR-02 |
-| UC-02 | Lọc kết quả theo giá/danh mục | Khách hàng | FR-04 |
-| UC-03 | Xem sản phẩm tương tự tại trang chi tiết | Khách hàng | FR-03 |
-| UC-04 | Thêm/cập nhật SKU vào danh mục | Quản trị viên | FR-05 |
-| UC-05 | Lập chỉ mục vector tự động | Hệ thống | FR-05 |
-
-### UC-01 Tìm kiếm sản phẩm bằng ảnh
-
-| Mục | Nội dung |
-|---|---|
-| Tiền điều kiện | Danh mục đã được lập chỉ mục |
-| Luồng chính | Chọn ảnh + K (tùy chọn) → hệ thống kiểm tra định dạng/dung lượng → chuẩn hóa ảnh, tìm K sản phẩm giống nhất → hiển thị theo độ tương đồng giảm dần |
-| Luồng thay thế | Ảnh sai định dạng/quá dung lượng → báo lỗi. Không có kết quả → thông báo. Có đặt bộ lọc → lọc áp dụng ngay trong cùng lần tìm kiếm (xem UC-02) |
-| Hậu điều kiện | Danh sách phù hợp hoặc thông báo lỗi/không có kết quả |
-
-```mermaid
-sequenceDiagram
-    actor KH as Khách hàng
-    participant WEB as Web Demo (React)
-    participant API as FastAPI
-    participant ENC as Bộ mã hóa ảnh
-    participant DB as Qdrant
-
-    KH->>WEB: Chọn ảnh, (tùy chọn) đặt K và bộ lọc
-    WEB->>API: POST /search/image (multipart)
-    API->>API: Kiểm tra định dạng & dung lượng (FR-01)
-    alt Ảnh không hợp lệ
-        API-->>WEB: 400 {detail: "..."}
-        WEB-->>KH: Hiển thị lỗi
-    else Ảnh hợp lệ
-        API->>ENC: encode(ảnh)
-        ENC-->>API: vector 512 chiều (Fashion-CLIP thật, mục 1.5)
-        API->>DB: search(vector, k, bộ lọc)
-        DB-->>API: Top-K (payload, score)
-        API-->>WEB: 200 {items, timing_ms}
-        WEB-->>KH: Hiển thị Top-K
-    end
-```
-
-### UC-04 Thêm/cập nhật SKU vào danh mục
-
-| Mục | Nội dung |
-|---|---|
-| Tiền điều kiện | Truy cập được trang/API quản trị (demo, chưa xác thực — mục 1.4) |
-| Luồng chính | Nhập SKU/tên/danh mục/giá + ảnh → kiểm tra dữ liệu → mã hóa ảnh → lưu/ghi đè vào Qdrant (kích hoạt UC-05) → xác nhận |
-| Luồng thay thế | Dữ liệu không hợp lệ → báo lỗi, không lưu. SKU đã tồn tại → ghi đè, trả `updated = true` |
-| Hậu điều kiện | Sản phẩm tìm kiếm được ngay ở lần truy vấn kế tiếp |
-
-```mermaid
-sequenceDiagram
-    actor QT as Quản trị viên
-    participant WEB as Trang quản trị
-    participant API as FastAPI
-    participant ENC as Bộ mã hóa ảnh
-    participant DB as Qdrant
-
-    QT->>WEB: Nhập SKU, tên, danh mục, giá, chọn ảnh
-    WEB->>API: POST /admin/items (multipart)
-    API->>API: Kiểm tra SKU, giá, định dạng ảnh (FR-05)
-    alt Dữ liệu không hợp lệ
-        API-->>WEB: 400 {detail: "..."}
-        WEB-->>QT: Hiển thị lỗi
-    else Hợp lệ
-        API->>ENC: encode(ảnh)
-        ENC-->>API: vector 512 chiều (Fashion-CLIP thật, mục 1.5)
-        Note over API,DB: UC-05 — Lập chỉ mục tự động
-        API->>DB: upsert(sku, vector, payload)
-        DB-->>API: đã lưu (mới hoặc ghi đè)
-        API-->>WEB: 200 {sku, ..., updated}
-        WEB-->>QT: Xác nhận đã thêm/cập nhật
-    end
-```
-
-## IV. Yêu cầu chức năng (FR)
-
-MoSCoW: **M** = Must, **S** = Should, **C** = Could.
-
-| Mã | User story | FR | Ưu tiên |
-|---|---|---|---|
-| US-01 | Khách hàng tải ảnh một món đồ để tìm sản phẩm giống nó | FR-01, FR-02 | M |
-| US-02 | Khách hàng xem sản phẩm tương tự khi đang xem một sản phẩm | FR-03 | M |
-| US-03 | Admin thêm sản phẩm và tìm kiếm được ngay | FR-05 | M |
-| US-04 | Khách hàng lọc kết quả theo giá và danh mục | FR-04 | S |
-
-| Mã | Yêu cầu | Ưu tiên | Tiêu chí chấp nhận |
-|---|---|---|---|
-| **FR-01** Upload & Preprocessing | Upload `.jpg`/`.png`, kiểm tra định dạng, chuẩn hóa kích thước | M | Từ chối file sai định dạng/> 5 MB kèm lỗi rõ ràng; ảnh hợp lệ chuẩn hóa về 224×224 (Fashion-CLIP, mục 1.5) |
-| **FR-02** Visual Search | Trả Top-K sản phẩm giống nhất | M | K mặc định 10, tối đa 50; sắp xếp giảm dần theo độ tương đồng; mỗi kết quả có SKU, tên, giá, ảnh, score |
-| **FR-03** Similar Items | Sản phẩm cùng kiểu dáng tại trang chi tiết | M | Danh sách không chứa chính sản phẩm đang xem |
-| **FR-04** Attribute Filtering | Kết hợp Vector Search với lọc giá/danh mục | S | Kết quả trả về thỏa bộ lọc; không khớp → danh sách rỗng |
-| **FR-05** Catalog Indexing | Tự trích xuất vector khi Admin thêm SKU | M | SKU mới tìm được ngay sau khi thêm; thêm trùng SKU → cập nhật, không tạo bản sao |
-
-## V. Yêu cầu phi chức năng (NFR)
-
-Điều kiện đo NFR-01/03: chạy trên danh mục $100.000+$ vector, ghi rõ cấu hình phần cứng.
-
-| Mã | Yêu cầu | Chỉ tiêu | Cách kiểm chứng |
-|---|---|---|---|
-| **NFR-01** Latency | Độ trễ phản hồi | API E2E $< 300\text{ms}$; vector query $< 50\text{ms}$ (Fashion-CLIP trên GPU; CPU có thể cao hơn — mục X) | Test hiệu năng, báo cáo p50/p95 |
-| **NFR-02** Accuracy | Độ chính xác truy hồi | $Recall@10 \ge 80\%$ trên tập test tự tách từ Fashion Product Images (Small) (nhóm theo `articleType`, vì dataset này không có split query/gallery chuẩn như DeepFashion), đo với Fashion-CLIP thật | Script đánh giá tự tách query/gallery, mục IX |
-| **NFR-03** Scalability | Khả năng mở rộng | $100.000+$ vector, $RPS \ge 50$ | Load test (Locust), bổ sung vector giả lập |
-| **NFR-04** Deployability | Khả năng triển khai | Toàn bộ hệ thống chạy bằng `docker-compose up` | Triển khai thử trên máy sạch |
-| **NFR-05** Maintainability | Khả năng bảo trì | Coverage $\ge 70\%$ module lõi, code qua linter | Báo cáo coverage trong CI |
-
-## VI. Công cụ và Công nghệ sử dụng
-
-* **AI:** Fashion-CLIP thật (`ViT-B/32`, 512 chiều — chính thức, mục 1.5); bộ mã hóa dự phòng
-  88 chiều (fallback).
-* **Dataset:** Fashion Product Images (Small) (Kaggle, Param Aggarwal, ~44.100 ảnh).
-* **Backend & Storage:** Python 3.11+, FastAPI, Qdrant (chỉ mục HNSW).
-* **Front-end:** React + Vite.
-* **DevOps:** Docker & Docker Compose.
-* **Quy trình:** Git + GitHub (Pull Request, commit theo quy ước), GitHub Projects (Kanban),
-  `pytest`/`httpx`, GitHub Actions (CI), draw.io/PlantUML.
-
-## VII. Quy trình phát triển (Agile cá nhân)
-
-Scrum rút gọn: Product Backlog (mục IV) ưu tiên MoSCoW → Sprint Backlog hằng tuần → Review +
-Retrospective vào `docs/sprint-log.md`. Product Owner là giảng viên. Definition of Done: merge
-qua Pull Request, có unit test, qua CI, đáp ứng tiêu chí chấp nhận.
-
-| Iteration | Trọng tâm |
-|---|---|
-| 0 | SRS, dựng repo/CI, vẽ Use Case |
-| 1 | Front-end React + bộ mã hóa mô phỏng |
-| 2 | Backend FastAPI + Qdrant, API Visual Search/Similar/Admin (FR-02, 03, 05); tích hợp Fashion-CLIP (mục 1.5) |
-| 3 | Ghép front-end với API thật, bộ lọc (FR-04), Docker Compose |
-| 4 | Đo hiệu năng/độ chính xác, hoàn thiện tài liệu, chuẩn bị bảo vệ |
-
-## VIII. Sản phẩm bàn giao
-
-1. Tài liệu đặc tả yêu cầu (SRS) — tài liệu này.
-2. Mô hình UML: Use Case (mục III), Sequence (UC-01, UC-04), ER/Class.
-3. Mã nguồn hệ thống — front-end (React + Vite) và backend (FastAPI + Qdrant) — kèm
-   `docker-compose.yml`.
-4. Kế hoạch/báo cáo kiểm thử, ma trận truy vết (mục IX).
-5. Báo cáo Recall@10 và hiệu năng đo với Fashion-CLIP thật; nếu không có mạng/GPU thì báo cáo
-   số liệu trên bộ mã hóa dự phòng kèm ghi chú.
-6. Nhật ký dự án: backlog, sprint log, lịch sử commit/PR.
-7. Slide và demo bảo vệ.
-
-## IX. Kiểm thử và đảm bảo chất lượng
-
-| Mức | Nội dung | Công cụ |
+| Tính năng (bản 02) | Bản 02 làm ở đâu | Bản 03 (này) làm ở đâu |
 |---|---|---|
-| Unit test | Validate ảnh, tiền xử lý, mã hóa, lọc | `pytest` |
-| Integration test | API ↔ mã hóa ↔ Qdrant | `pytest`, `httpx` |
-| Kiểm thử chức năng | Tiêu chí chấp nhận FR-01…FR-05 | `pytest`, thủ công |
-| Kiểm thử hiệu năng | Latency p50/p95, RPS trên $100.000+$ vector | Locust |
-| Đánh giá mô hình | Recall@10 trên tập test tự tách từ Fashion Product Images (Small) | Script riêng |
-| Kiểm thử chấp nhận | 3–5 người dùng thử theo UC-01…UC-04 | Khảo sát ngắn |
+| Trang cửa hàng: slider, danh mục, hàng mới về, bán chạy, đánh giá, đăng ký nhận tin, giao diện tối | trình duyệt | giao diện như bản 02; "Hàng mới về" lấy từ `GET /items?sort=newest`, email nhận tin lưu ở backend (SQLite) |
+| Tìm theo tên (gõ không dấu vẫn ra), sắp xếp, "Xem thêm" (Sprint 1: PB-01→03) | lọc/sắp mảng trong bộ nhớ | **backend** tìm, sắp xếp, phân trang (`q`, `sort`, `offset`, `limit`) — trình duyệt chỉ tải từng trang 24 sản phẩm |
+| Chọn size, giỏ hàng (PB-04) | localStorage | giỏ vẫn ở localStorage (khách chưa đăng nhập), nhưng chỉ lưu `sku/size/qty`; tên, giá, ảnh luôn lấy mới từ backend |
+| Đặt hàng | localStorage | `POST /orders` — **backend tự tính lại giá**, không tin giá do trình duyệt gửi |
+| Tra cứu đơn bằng mã + số điện thoại (PB-05) | localStorage của đúng trình duyệt đã đặt | `POST /orders/lookup` — tra được từ mọi thiết bị; chống dò mã đơn |
+| Quản trị đơn: lọc, đổi trạng thái, lịch sử, doanh thu (PB-06) | localStorage | `GET/PATCH/DELETE /admin/orders` — máy trạng thái kiểm tra ở backend, giao dịch SQLite |
 
-Mọi Pull Request phải qua CI (lint + test) trước khi merge vào `main`.
+**Lỗi có sẵn trong bản 03 trước đó, đã sửa** (phát hiện khi chạy thật thay vì chỉ rà soát tĩnh):
 
-**Ma trận truy vết yêu cầu** (cột "Kiểm thử" nêu tên lớp/hàm test dự kiến trong
-`backend/tests/`, ánh xạ mỗi yêu cầu với test case sẽ kiểm chứng nó):
+* **Nghiêm trọng — tìm kiếm bằng Qdrant không chạy được:** `QdrantStore` gọi `client.search()`,
+  phương thức đã bị gỡ khỏi `qdrant-client` bản mới (bản mà `pip install -r requirements.txt`
+  cài hôm nay, 1.19.x) → mọi lượt tìm kiếm ở chế độ mặc định (`STORE_BACKEND=qdrant`) lỗi 500.
+  Đã chuyển sang `query_points()` (có từ 1.10, đã nâng yêu cầu `qdrant-client>=1.10`) và thêm
+  kiểm thử "hợp đồng" chạy `QdrantStore` thật (chế độ cục bộ của qdrant-client) so với `MemoryStore`.
+* `tests/test_api.py`: tạo `TestClient(app)` không qua `with` nên `lifespan` không chạy, danh mục
+  rỗng → 3/9 test luôn fail. Đã sửa fixture.
+* Nginx mặc định chỉ nhận request ≤ 1 MB → ảnh chụp điện thoại (2–5 MB) bị chặn với lỗi 413 khi
+  chạy bằng Docker. Đã đặt `client_max_body_size 6m` (`frontend/nginx.conf`).
+* Giá `nan`/`inf` lọt qua kiểm tra; quản trị không kiểm tra danh mục và độ dài tên. Giá nay
+  phải là số nguyên đồng, tối đa 1 tỷ (giá lẻ làm tổng tiền giỏ hàng lệch với tổng backend tính).
+* Thiếu `frontend/.dockerignore`: `node_modules` cài trên Windows/macOS bị chép đè vào image →
+  `npm run build` trong container lỗi do esbuild khác nền tảng.
+* Bảng đơn hàng làm **cả trang** tràn ngang trên điện thoại khi có đơn (nhãn ẩn cho trình đọc
+  màn hình thoát khỏi vùng cuộn của bảng) — lỗi có từ bản 02, chỉ lộ ra khi bảng có dữ liệu.
 
-| Yêu cầu | User story | Use case | Kiểm thử |
-|---|---|---|---|
-| FR-01 | US-01 | UC-01 | `ValidateTests` — `test_core.py` |
-| FR-02 | US-01 | UC-01 | `SearchTests.test_top_k_orders_by_similarity`, `test_k_caps_result_count` — `test_core.py` |
-| FR-03 | US-02 | UC-03 | `SearchTests.test_exclude_sku` — `test_core.py` |
-| FR-04 | US-04 | UC-02 | `SearchTests.test_category_filter`, `test_price_range_filter` — `test_core.py` |
-| FR-05 | US-03 | UC-04, UC-05 | `MemoryStoreTests.test_upsert_then_get`, `test_upsert_twice_reports_updated` — `test_core.py` |
-| NFR-01, 03 | — | — | Load test bằng Locust |
-| NFR-02 | — | — | Script đánh giá Recall@10, chạy với Fashion-CLIP thật (mục 1.5) |
-| NFR-04 | — | — | Triển khai thử `docker-compose up` trên máy sạch |
-| NFR-05 | — | — | Coverage `test_core.py` đo qua CI; `ruff check --select=F,E9` |
+## Kiến trúc
 
-## X. Quản lý rủi ro
+```
+┌─────────────────────────────┐
+│  React SPA (Vite)            │  HashRouter · 7 trang · frontend/src/
+│  giỏ hàng: localStorage      │  mọi request đi qua frontend/src/lib/api.js
+└──────────────┬──────────────┘
+               │ HTTP (JSON / multipart), đường dẫn tương đối /api/v1/..., /health
+               │ Nginx proxy (service "web") hoặc Vite dev proxy (npm run dev)
+               ▼
+┌─────────────────────────────┐
+│  FastAPI (service "api")     │  backend/app/ — routers: search, items, admin,
+│                              │  orders, admin_orders, newsletter, health
+└───────┬──────────────┬──────┘
+        │ VectorStore  │ OrderStore
+        ▼              ▼
+┌────────────────┐  ┌───────────────────────────────┐
+│ QdrantStore    │  │ SQLite qua ORM SQLAlchemy      │
+│ (mặc định) —   │  │ orders · order_items ·         │
+│ hoặc           │  │ order_history · newsletter     │
+│ MemoryStore    │  │ volume api_data                │
+│ (kiểm thử)     │  └───────────────────────────────┘
+└───────┬────────┘
+        ▼
+┌─────────────────────────────┐
+│  Qdrant (service "qdrant")   │  HNSW, cosine — volume qdrant_data
+└─────────────────────────────┘
+```
 
-| Rủi ro | Mức độ | Biện pháp giảm thiểu |
+* **Mỗi loại dữ liệu ở đúng loại CSDL hợp với nó:** sản phẩm + vector đặc trưng ở Qdrant (tìm
+  theo độ giống); đơn hàng là dữ liệu quan hệ (một đơn nhiều dòng hàng, nhiều mốc trạng thái,
+  cần giao dịch khi đổi trạng thái, khóa ngoại khi xóa) nên ở SQLite.
+* `VectorStore` là interface (`backend/app/store/base.py`, Repository/Strategy pattern) với hai
+  cách triển khai cho ra **cùng một kết quả** (có kiểm thử hợp đồng): `QdrantStore` và
+  `MemoryStore` (dict + NumPy, không cần Qdrant). Đổi bằng `STORE_BACKEND` (`qdrant` | `memory`).
+* Logic nghiệp vụ nằm trong `backend/app/core/` (thuần Python, không phụ thuộc FastAPI/Qdrant):
+  tìm theo chữ tiếng Việt, sắp xếp, phân trang, tính tiền đơn, máy trạng thái đơn, chống dò mã.
+* Front-end: `AppContext` (ảnh đang tìm, "phiên bản danh mục", trạng thái kết nối backend),
+  `CartContext` (giỏ hàng + đặt hàng). Mất kết nối backend thì hiện banner; có lại thì banner tự
+  ẩn và trang đang mở tự tải lại dữ liệu.
+
+## Chạy toàn bộ hệ thống (khuyến nghị — Docker Compose)
+
+Yêu cầu: Docker + Docker Compose.
+
+```bash
+docker-compose up --build
+```
+
+* Trang web: <http://localhost:5173>
+* API + tài liệu Swagger: <http://localhost:8000/docs>
+* Qdrant dashboard: <http://localhost:6333/dashboard>
+
+Lần khởi động đầu, backend tạo collection Qdrant và tệp SQLite cho đơn hàng. Danh mục lúc này
+**trống** — cửa hàng chỉ dùng ảnh thật, nên cần nạp ảnh H&M một lần (mục tiếp theo). Bài nộp không
+kèm ảnh H&M vì điều khoản Kaggle không cho phân phối lại.
+
+```bash
+docker-compose down       # dừng, giữ dữ liệu (volume qdrant_data + api_data)
+docker-compose down -v    # dừng và xóa luôn sản phẩm đã lập chỉ mục, đơn hàng, email nhận tin
+```
+
+## Nạp ảnh sản phẩm thật từ bộ dữ liệu H&M (bắt buộc, làm một lần)
+
+Toàn bộ sản phẩm của cửa hàng là ảnh thật từ bộ **H&M Personalized Fashion Recommendations**
+(Kaggle) — đúng loại ảnh Fashion-CLIP được huấn luyện. Ứng dụng không tự vẽ ảnh mẫu:
+
+1. Tải bộ dữ liệu: <https://www.kaggle.com/competitions/h-and-m-personalized-fashion-recommendations/data>
+   (cần tài khoản Kaggle và bấm đồng ý điều khoản cuộc thi; hoặc
+   `kaggle competitions download -c h-and-m-personalized-fashion-recommendations`). Chỉ cần
+   `articles.csv` và thư mục `images/` (~30 GB); `transactions_train.csv` (3,5 GB) là tùy chọn — dùng
+   để lấy giá thật.
+2. Chạy script (backend và Qdrant đang chạy bằng docker-compose):
+
+```bash
+docker compose run --rm -v "/duong/dan/hm:/data/hm:ro" api \
+    python -m app.import_hm --data /data/hm --per-category 200
+# xem trước sẽ nạp gì, không ghi:            thêm --dry-run
+# lấy giá thật từ lịch sử mua:              thêm --transactions /data/hm/transactions_train.csv
+```
+
+Chạy thủ công (không Docker): `cd backend && python -m app.import_hm --data /duong/dan/hm`.
+
+Script chọn tối đa `--per-category` sản phẩm có ảnh cho mỗi danh mục của cửa hàng (T-shirt/Vest
+top/Top/Polo → áo thun; Shirt/Blouse → sơ mi; Dress → váy; Trousers/Shorts/Leggings → quần;
+Jacket/Coat/Blazer/Cardigan → áo khoác; các loại khác như giày, túi bị bỏ qua), mỗi mẫu một màu,
+chọn ngẫu nhiên có hạt giống (chạy lại ra cùng tập). Ảnh được đệm thành vuông nền trắng (không
+cắt mất phần trên/dưới của ảnh dọc), mã hóa theo lô bằng bộ mã hóa đang dùng và ghi vào Qdrant
+theo lô; ảnh hiển thị lưu dạng JPEG 256 px (~12 KB). SKU `HM-<mã 10 số>`, tên tiếng Anh kèm màu
+tiếng Việt ("Linen dress (be)"), nguồn `hm` (trang sản phẩm ghi "Ảnh thật — bộ dữ liệu H&M"). Giá:
+trung bình giá trong `transactions_train.csv` × 10.000.000 (giá H&M đã được chuẩn hóa), không có
+tệp này thì lấy giá cố định theo mã trong khoảng hợp lý của từng danh mục. Chạy lại an toàn: SKU
+đã có thì bỏ qua. Tốc độ tham khảo: Fashion-CLIP trên CPU ~5–15 ảnh/giây (1.000 ảnh ≈ 2 phút) —
+chưa đo được ở môi trường soạn thảo.
+
+Bộ dữ liệu H&M chỉ được dùng cho nghiên cứu/học tập theo điều khoản cuộc thi — không đưa ảnh vào
+kho mã nguồn hay triển khai thương mại.
+
+## Chạy từng phần thủ công (chế độ phát triển, không cần Docker)
+
+```bash
+# Backend — cách A: Fashion-CLIP + Qdrant đang chạy ở localhost:6333
+cd backend && pip install -r requirements.txt
+pip install torch --index-url https://download.pytorch.org/whl/cpu && pip install -r requirements-ml.txt
+uvicorn app.main:app --reload          # lần đầu tự tải mô hình Fashion-CLIP (~600 MB) từ HuggingFace
+
+# Máy yếu / chưa muốn cài PyTorch: dùng bộ mã hóa mô phỏng
+ENCODER=simple uvicorn app.main:app --reload
+
+# Backend — cách B: không cần Qdrant (sản phẩm trong bộ nhớ, mất khi dừng; đơn hàng vẫn ghi
+# vào backend/data/stylelens.sqlite3)
+cd backend && STORE_BACKEND=memory uvicorn app.main:app --reload   # thêm ENCODER=simple nếu chưa cài PyTorch
+
+# Front-end (terminal khác) — Vite tự proxy /api và /health sang localhost:8000
+cd frontend && npm install && npm run dev
+```
+
+| Biến môi trường | Mặc định | Ý nghĩa |
 |---|---|---|
-| Làm một mình, dễ quá tải/trễ tiến độ | Cao | Chốt MVP gồm yêu cầu Must; theo dõi tiến độ hằng tuần |
-| Có thể không đủ thời gian/tài nguyên để tích hợp Fashion-CLIP thật trước hạn nộp | Cao | Thiết kế điểm tích hợp tách rõ từ đầu (mục 1.5) để việc thay bộ mã hóa là một thay đổi cục bộ; ưu tiên làm sớm ở Iteration 2 |
-| Fashion Product Images (Small) chỉ ~44.100 ảnh, chưa đủ $100.000+$ vector cho NFR-03 | Trung bình | Bổ sung vector giả lập để load test, nêu rõ trong báo cáo |
-| Dataset không có split query/gallery chuẩn cho retrieval (khác DeepFashion) | Trung bình | Tự tách test theo `articleType`; ghi rõ phương pháp để Recall@10 không bị hiểu nhầm là so sánh trực tiếp với DeepFashion |
-| Chưa xác nhận rõ license của dataset trên Kaggle | Thấp | Ghi nguồn/tác giả trong báo cáo, chỉ dùng phi thương mại, kiểm tra lại trước khi nộp |
-| Môi trường phát triển có thể không đủ mạng/quyền để tải PyTorch và trọng số Fashion-CLIP thật | Trung bình | Thiết kế dự phòng: hệ thống vẫn chạy được bằng bộ mã hóa đơn giản hơn nếu cần (mục 1.5) |
-| Thiếu GPU khi chạy Fashion-CLIP thật | Trung bình | Mã hóa theo lô, lưu lại vector; không có GPU thì đo và báo cáo độ trễ thật trên CPU |
-| Mất mã nguồn/dữ liệu | Thấp | Đẩy code lên GitHub thường xuyên; sao lưu vector đã mã hóa |
+| `STORE_BACKEND` | `qdrant` | `qdrant` hoặc `memory` |
+| `ENCODER` | `fashionclip` | `fashionclip` (Fashion-CLIP, 512 chiều, cần `requirements-ml.txt`) hoặc `simple` (bộ mô phỏng 88 chiều). Docker: đặt `ENCODER=simple docker-compose up --build` để có image nhỏ |
+| `FASHION_CLIP_MODEL` / `ENCODER_DEVICE` | `patrickjohncyh/fashion-clip` / `cpu` | mô hình trên HuggingFace; `cuda` nếu có GPU |
+| `QDRANT_HOST` / `QDRANT_PORT` / `QDRANT_COLLECTION` | `localhost` / `6333` / `stylelens_items` | kết nối Qdrant |
+| `ORDERS_DB_PATH` | `data/stylelens.sqlite3` | tệp SQLite đơn hàng + nhận tin (`:memory:` khi kiểm thử) |
+| `LOOKUP_MAX_FAILURES` / `LOOKUP_WINDOW_SECONDS` | `10` / `900` | tra cứu đơn sai bao nhiêu lần trong bao lâu thì tạm khóa số điện thoại đó |
+| `ADMIN_PASSWORD` | `stylelens-admin` | mật khẩu quản trị — **bắt buộc đổi khi triển khai** (backend ghi cảnh báo khi dùng mặc định) |
+| `ADMIN_TOKEN_SECRET` | ngẫu nhiên mỗi lần khởi động | khóa ký token; đặt cố định để phiên đăng nhập không mất khi khởi động lại |
+| `ADMIN_TOKEN_TTL` / `LOGIN_MAX_FAILURES` | `28800` / `5` | hạn token (giây); số lần đăng nhập sai trước khi khóa 15 phút |
+| `CORS_ORIGINS` | `*` | nguồn được gọi API trực tiếp (không cần khi đi qua proxy) |
+| `VITE_BACKEND_PORT` (front-end) | `8000` | cổng backend cho proxy của Vite |
+| `VITE_API_BASE_URL` (front-end) | rỗng | trỏ thẳng tới một backend khác |
 
-## XI. Phân công
+## Đặc tả API
 
-| Vai trò | Người phụ trách |
+Lỗi luôn có dạng `{"detail": "thông báo tiếng Việt"}` (riêng 422 do FastAPI tự sinh khi sai kiểu
+dữ liệu). Xem ví dụ request/response trực tiếp tại `/docs` khi backend đang chạy.
+
+| Method | Endpoint | Mô tả | Yêu cầu |
+|---|---|---|---|
+| GET | `/health` | `{"status": "ok" \| "degraded", "encoder": "fashion-clip" \| "simple", "vector_dim": 512 \| 88}` — `degraded`: API chạy nhưng Qdrant không trả lời | — |
+| POST | `/api/v1/search/image` | Multipart: `file` (bắt buộc), `top_k`, `category`, `min_price`, `max_price`, `q` (chỉ xếp hạng trong sản phẩm khớp từ khóa), `sort`. Trả `{items, timing_ms: {encode, search}, total_indexed}`; mỗi item có `score` và `rank` (hạng độ giống — giữ nguyên khi sắp theo giá/tên) | FR-01, 02, 04, PB-02 |
+| GET | `/api/v1/items` | Duyệt danh mục: `category`, `min_price`, `max_price`, `source` (`hm`\|`admin`), `q` (tên/danh mục/SKU, không dấu vẫn khớp), `sort`, `offset`, `limit` (≤ 500), `skus` (danh sách cách nhau bởi dấu phẩy, ≤ 100 — giỏ hàng). Trả `{items, total}` (`total` = số khớp trước khi cắt trang) | PB-01, 02, 03 |
+| GET | `/api/v1/items/{sku}` | Chi tiết sản phẩm; 404 nếu không có | — |
+| GET | `/api/v1/items/{sku}/similar` | Sản phẩm tương tự (dùng lại vector đã lưu): `k`, `same_category` | FR-03 |
+| POST | `/api/v1/admin/login` | JSON `{password}` → `{token, expires_at}`; 401 sai mật khẩu; 429 sai quá 5 lần / 15 phút. Mọi endpoint `/api/v1/admin/...` khác cần header `Authorization: Bearer <token>`, thiếu/sai/hết hạn → **401** | PB-10 |
+| GET | `/api/v1/admin/me` | 200 nếu token còn hiệu lực | PB-10 |
+| GET | `/api/v1/items/{sku}/outfit` | Gợi ý phối đồ: `per_group` (1–8, mặc định 3) → `{sku, groups: [{category, label, items}]}`, mỗi item có `match` (0..1) và `reason` | PB-11 |
+| POST | `/api/v1/admin/items` | Thêm/cập nhật SKU — multipart `sku`, `name`, `category`, `price` (số nguyên đồng), `file`. Trả sản phẩm vừa lưu + cờ `updated` | FR-05 |
+| DELETE | `/api/v1/admin/items/{sku}` | Xóa SKU do Admin thêm (không xóa được sản phẩm H&M) | mở rộng |
+| POST | `/api/v1/orders` | JSON `{customer, payment: "cod"\|"bank", items: [{sku, size, qty}], coupon?}` → **201** đơn hàng. Giá, phí giao (30.000 ₫, miễn phí từ 500.000 ₫), tổng tiền do backend tính từ danh mục hiện tại | FR-08, PB-04 |
+| POST | `/api/v1/orders/quote` | JSON `{items, coupon}` → `{subtotal, shipping, discount, total, coupon, coupon_description}` — tính thử theo giá hiện tại, chưa tạo đơn; mã sai/chưa đủ điều kiện → 400 kèm lý do | PB-09 |
+| POST | `/api/v1/orders/lookup` | JSON `{code, phone}` → đơn hàng; **404** một thông báo chung cho mọi trường hợp không khớp; **429** khi tra sai quá nhiều lần với cùng số điện thoại | PB-05 |
+| GET | `/api/v1/admin/orders` | `?status=` → `{orders, counts, total, revenue}` (doanh thu không tính đơn đã hủy) | PB-06 |
+| PATCH | `/api/v1/admin/orders/{id}` | JSON `{status}` → đơn đã cập nhật; **409** nếu chuyển sai luồng (Mới → Đang giao → Hoàn tất, hoặc → Đã hủy) | PB-06 |
+| DELETE | `/api/v1/admin/orders/{id}` | Xóa đơn (dòng hàng, lịch sử xóa theo nhờ khóa ngoại) | PB-06 |
+| POST | `/api/v1/newsletter` | JSON `{email}` → **201** `subscribed` / **200** `already` / 400 | FR-10 |
+
+`sort` nhận: `relevance` (mặc định — duyệt thì theo SKU, tìm bằng ảnh thì theo độ giống),
+`newest` (sản phẩm Admin thêm gần nhất trước), `price-asc`, `price-desc`, `name-asc` (đúng thứ
+tự bảng chữ cái tiếng Việt: a ă â b c d đ e ê …).
+
+**Sản phẩm (`Item`):**
+
+```json
+{ "sku": "HM-0706016001", "name": "Jade HW Skinny Denim TRS (đen)", "category": "pants", "price": 329000,
+  "image": "data:image/jpeg;base64,...", "source": "hm", "created_at": null,
+  "score": 0.87, "rank": 1 }
+```
+
+`score`/`rank` chỉ có trong kết quả tìm kiếm/gợi ý; `created_at` chỉ có ở SKU do Admin thêm.
+
+**Đơn hàng (`Order`):**
+
+```json
+{ "id": "DH-261002-4821", "created_at": "2026-10-02T09:30:00+07:00", "status": "new",
+  "customer": { "name": "Nguyễn Văn A", "phone": "0912345678", "email": "", "address": "12 Phố Huế, Hà Nội", "note": "" },
+  "payment": "cod",
+  "items": [ { "sku": "HM-0706016001", "size": "M", "qty": 1, "name": "Jade HW Skinny Denim TRS (đen)", "price": 329000 } ],
+  "subtotal": 329000, "shipping": 30000, "coupon": "GIAM10", "discount": 32900, "total": 326100,
+  "history": [ { "status": "new", "at": "2026-10-02T09:30:00+07:00" } ] }
+```
+
+## Ánh xạ với đặc tả yêu cầu
+
+| Yêu cầu | Trong bản full-stack |
 |---|---|
-| Toàn bộ (Product Owner, phân tích, thiết kế, lập trình, kiểm thử) | Trần Công Thành Đạt - 23010782 — làm cá nhân |
+| FR-01 Tải ảnh lên | Kiểm tra định dạng/dung lượng ở cả front-end và backend (đọc theo đoạn, dừng sớm khi quá 5 MB) |
+| FR-02 Top-K giống nhất | Qdrant (cosine, HNSW) qua `QdrantStore.search()` → `query_points` |
+| FR-03 Sản phẩm tương tự | `GET /items/{sku}/similar`, dùng lại vector đã lập chỉ mục |
+| FR-04 Lọc danh mục/giá | `category`/`min_price`/`max_price` ở mọi endpoint liên quan |
+| FR-05 Quản trị SKU | `POST /admin/items`, mã hóa và lập chỉ mục ngay khi lưu |
+| FR-06 → FR-10 (bản 02): cửa hàng, giỏ hàng, đặt hàng, giao diện tối, nhận tin | Như bản 02; đặt hàng và nhận tin lưu ở backend |
+| PB-01 → PB-06 (2 sprint của bản 02) | Đạt toàn bộ tiêu chí chấp nhận — kiểm chứng lại bằng E2E trên backend thật (xem "Kiểm thử") |
+| NFR-01 Độ trễ | **Đạt** tới 55 request/giây trên 100.000 vector (máy đo Ryzen 7 7800X3D, 32 GB, RTX 5060 Ti 16 GB, Ubuntu 24.04.5): p95 tìm bằng ảnh 250 ms, truy vấn vector p95 20 ms. Ở 72 request/giây p95 lên 420 ms. Cách đo: `docs/NFR.md` |
+| NFR-02 Recall@10 | **Đạt** — Fashion-CLIP 98,9% (bộ 88 chiều: 79,9%) trên 1.000 truy vấn H&M; Precision@10 74,3%; tìm lại cùng mẫu khác màu 73,1% (`nfr/eval_recall.py`) |
+| NFR-03 Danh mục lớn | **Đạt** — 100.000 vector (25.000 ảnh H&M thật), 55,1 request/giây trong chỉ tiêu độ trễ, tối đa đo được 72,3 request/giây, 0 lỗi. Lần đo đầu chỉ 34 request/giây; vòng 9 thêm chỉ mục danh mục trong bộ nhớ (`app/store/catalog_index.py`) |
+| NFR-04 Container | **Đạt** — `docker compose up` chạy thành công trên máy Ubuntu mới cài (3 service, 2 volume) |
+| NFR-05 Bảo trì, kiểm thử | `core/` thuần Python; 126 test backend + 52 test front-end chạy không cần mạng; `ruff`, ESLint; coverage backend 95% (đo trên máy đo), front-end `src/lib/` ≥ 84% — **đạt** |
+| PB-08 → PB-11 (2 sprint của bản 03) | Xem `docs/SPRINTS.md` — đạt toàn bộ tiêu chí chấp nhận |
 
-## XII. Tài liệu tham khảo
+## Kiểm thử và chất lượng
 
-* Chia, P.J. et al. (2022). *Contrastive language and vision learning of general fashion
-  concepts.* Scientific Reports — bài báo gốc Fashion-CLIP (`patrickjohncyh/fashion-clip`).
-* Aggarwal, P. *Fashion Product Images (Small).* Kaggle Dataset —
-  <https://www.kaggle.com/datasets/paramaggarwal/fashion-product-images-small>.
-* Malkov, Y., Yashunin, D. (2018). *Efficient and Robust Approximate Nearest Neighbor Search
-  Using Hierarchical Navigable Small World Graphs.* IEEE TPAMI — thuật toán HNSW.
-* Qdrant documentation. <https://qdrant.tech/documentation/>
-* FastAPI documentation. <https://fastapi.tiangolo.com/>
-* React documentation. <https://react.dev/>
+```bash
+cd backend
+python3 -m pytest tests -v            # 126 test (+23 subtest); kiểm thử dùng ENCODER=simple, STORE_BACKEND=memory
+RUN_FASHION_CLIP=1 HM_DATA_DIR=/duong/dan/hm python3 -m pytest tests/test_embedding.py -v   # thêm 3 bài Fashion-CLIP thật trên 100 ảnh H&M (cần requirements-ml.txt)
+#   test_core.py        32  validate, encoder, search, MemoryStore, upload_utils
+#   test_shop_core.py   32  tìm chữ tiếng Việt, sắp xếp, phân trang, đơn hàng, máy trạng thái, ORM SQLite + migration,
+#                           chống dò mã, token quản trị, phối đồ, mã giảm giá
+#   test_api.py         28  endpoint HTTP thật (FastAPI TestClient), dữ liệu: 25 ảnh tổng hợp (tests/synthetic_catalog.py)
+#   test_embedding.py    7  Fashion-CLIP với mô hình giả, chọn bộ mã hóa, chuyển dữ liệu sang collection mới
+#   test_import_hm.py    7  script nạp H&M trên bộ dữ liệu H&M thu nhỏ (chọn, ánh xạ loại, giá, ảnh hỏng, chạy lại, Qdrant)
+#   test_qdrant_store.py 5  QdrantStore (qdrant-client chế độ cục bộ) cho cùng kết quả với MemoryStore, đọc theo trang
+#   test_nfr.py          5  script đo NFR: tính Recall@K, tách truy vấn/gallery, sinh vector giả lập, tổng hợp Locust
+
+cd frontend
+npm test                              # 52 test (node --test): api.js với fetch giả, giỏ hàng, bộ lọc, kiểm tra form…
+```
+
+Ngoài unit test, toàn hệ thống được kiểm thử đầu–cuối bằng Playwright (Chromium) trên **backend
+thật** (uvicorn, `MemoryStore` + SQLite) sau một proxy giống Nginx — giữ nguyên bộ tiêu chí
+ISO/IEC 25010 của bản 02 và thêm nhóm FS cho hành vi chỉ có ở full-stack:
+
+| Mã | Tiêu chí | Kết quả |
+|---|---|---|
+| F1 | Chức năng FR-01 → FR-10 đầu–cuối | 18/18 |
+| S1-AC, S2-AC | Tiêu chí chấp nhận PB-01 → PB-06 (bản 02) | 12/12, 16/16 |
+| S3-AC, S4-AC | Tiêu chí chấp nhận PB-10, PB-11, PB-09, PB-08 (2 sprint của bản 03) | 8/8, 6/6 |
+| FS | Dữ liệu dùng chung giữa các trình duyệt; giá đổi giữa lúc xem và lúc đặt; sản phẩm bị xóa khi đang trong giỏ; hai quản trị viên cùng đổi một đơn (409); XSS qua tên sản phẩm; debounce ô giá; chống dò mã đơn (429); "Xem thêm" khi đang tải lại; rời trang khi đơn đang gửi; giỏ hàng ở 2 tab; backend tắt/bật lại | 16/16 |
+| U1–U6 | WCAG 2.1 AA: tên truy cập, heading, landmark, tương phản (cả giao diện tối), bàn phím, vùng bấm ≥ 24 px, nhãn trường, focus khi chuyển trang | 0 vi phạm (8 trang × 2 giao diện) |
+| C1 | Không tràn ngang ở 320 / 390 / 768 / 1280 px | 33/33 |
+| R1, R2 | Dữ liệu localStorage hỏng, localStorage bị chặn; 0 lỗi console | Đạt |
+| P1 | Tải trang cửa hàng < 1,5 s; tìm kiếm vector < 50 ms | ~0,4 s; < 1 ms (25 sản phẩm tổng hợp của bộ kiểm thử) |
+
+Một lượt rà soát mã độc lập sau đó tìm thêm 9 vấn đề (đều đã sửa và có kiểm thử hồi quy), ví dụ:
+bấm "Xem thêm" đúng lúc đổi cách sắp xếp làm nối nhầm trang (sót sản phẩm); rời trang giỏ hàng
+khi đơn đang gửi thì mất màn hình xác nhận và mã đơn; mã đơn chỉ 4 chữ số nên dò được nếu biết số
+điện thoại; mã hóa ảnh chạy thẳng trên event loop làm các request khác phải chờ.
+
+### Đã kiểm tra được gì (và chưa) trong môi trường soạn thảo
+
+Môi trường soạn thảo **chặn npm registry, PyPI và Docker Hub, không có Docker daemon**:
+
+* **Đã chạy thật:** FastAPI 0.141 (lấy mã nguồn từ GitHub vì PyPI bị chặn) trên Starlette 1.0,
+  Pydantic 2.13, uvicorn 0.46; qdrant-client 1.19.1 ở chế độ cục bộ
+  (`QdrantClient(location=":memory:")`); toàn bộ test backend,
+  ruff (`F`, `E9`, `B904`); front-end: `node --test`, ESLint (bộ khuyến nghị + độ phức tạp), build
+  bằng esbuild, E2E + đo tiếp cận bằng Playwright; `docker compose config` (cú pháp compose).
+* **Fashion-CLIP thật chưa chạy được ở đây** (không tải được PyTorch và trọng số mô hình): phần tích
+  hợp được kiểm thử bằng mô hình giả cùng giao diện `CLIPModel`/`CLIPProcessor` (chia lô, chuyển
+  RGB, đọc đầu ra, chuẩn hóa L2, mã hóa lại dữ liệu cũ), tên hàm/thuộc tính đối chiếu với mã nguồn
+  transformers 4.57. Toàn bộ E2E chạy với `ENCODER=simple`. **Trên máy bạn, chạy kiểm thử với mô
+  hình thật:** `RUN_FASHION_CLIP=1 HM_DATA_DIR=/duong/dan/hm python3 -m pytest tests/test_embedding.py -v`
+  (trên 100 ảnh thật H&M: 512 chiều, tìm bằng câu mô tả ra đúng loại, món "tương tự" cùng loại).
+* **Chưa chạy được ở đây — cần tự chạy lại trên máy có mạng:** `npm install` / `npm run build`
+  bằng Vite thật (đã build bằng esbuild, `react-router-dom` thay bằng một bản giả lập tối giản khi
+  chạy E2E); `docker-compose up --build` (không tải được image); một **máy chủ Qdrant thật** (chỉ
+  mới chạy chế độ cục bộ của qdrant-client — cùng API, cùng mô hình bộ lọc); cấu hình Nginx.
+
+## Giới hạn (cần biết trước khi đưa lên mạng)
+
+* Quản trị dùng **một mật khẩu chung** (chưa có tài khoản/phân quyền từng người, chưa có nhật ký
+  thao tác). Phải đặt `ADMIN_PASSWORD` và chạy sau HTTPS khi triển khai. Khóa đăng nhập sai theo
+  IP dựa vào `X-Real-IP` do Nginx đặt; ai gọi thẳng cổng 8000 có thể giả header này — khi triển khai
+  chỉ mở cổng của Nginx.
+* Gợi ý phối đồ dựa trên quy tắc màu/họa tiết đơn giản (chưa học từ dữ liệu phối đồ thật), danh mục
+  chưa có giày/phụ kiện; với danh mục rất lớn chỉ xét tối đa 200 món mỗi loại.
+* Giới hạn tra cứu đơn / đăng nhập sai lưu trong bộ nhớ của **một** tiến trình; chạy nhiều tiến trình/máy chủ thì
+  chuyển sang kho dùng chung (ví dụ Redis). SQLite phù hợp một máy chủ; tải lớn thì chuyển sang
+  PostgreSQL (`OrderStore` là lớp riêng nên chỉ cần thay lớp này).
+* Đơn hàng không có thanh toán thật, không quản lý tồn kho; giỏ hàng gắn với trình duyệt (chưa có
+  tài khoản khách).
+* Cửa hàng cần bộ dữ liệu H&M (tải từ Kaggle, ~30 GB) để có sản phẩm — bài nộp không kèm ảnh.
+  Fashion-CLIP hiểu mô tả tiếng Anh; tìm theo tên tiếng Việt vẫn dùng so khớp chữ.
+* Gợi ý phối đồ vẫn dựa trên quy tắc màu/họa tiết đọc từ ảnh, chưa dùng vector Fashion-CLIP.
+
+## Cấu trúc thư mục
+
+```
+03-ThietKeWebNangCao-FullStack/
+├── docker-compose.yml      # 3 service: qdrant, api, web — 2 volume: qdrant_data, api_data
+├── backend/                 # FastAPI — xem backend/README.md
+│   ├── app/                 # core/ (thuần Python) · store/ · routers/
+│   ├── tests/
+│   ├── requirements.txt, requirements-ml.txt   # requirements-ml: torch + transformers (Fashion-CLIP)
+│   └── Dockerfile
+├── frontend/                # React + Vite — xem frontend/README.md
+│   ├── src/
+│   ├── tests/
+│   ├── Dockerfile, nginx.conf
+│   └── package.json
+└── docs/SPRINTS.md          # backlog, Definition of Done, nhật ký 2 sprint
+```

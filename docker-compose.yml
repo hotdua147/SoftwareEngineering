@@ -1,0 +1,57 @@
+# Chạy toàn bộ hệ thống full-stack: Qdrant (kho vector) + API (FastAPI, kèm SQLite cho đơn
+# hàng) + Web (React, build tĩnh phục vụ qua Nginx). Xem README.md ở thư mục này để biết cách chạy và đặc tả API.
+#
+#   docker-compose up --build      # lần đầu, hoặc sau khi sửa code
+#   docker-compose up -d           # chạy nền
+#   docker-compose down            # dừng (giữ lại dữ liệu Qdrant trong volume)
+#   docker-compose down -v         # dừng và xóa luôn dữ liệu Qdrant đã lập chỉ mục + đơn hàng
+
+services:
+  qdrant:
+    image: qdrant/qdrant:latest
+    ports:
+      - "6333:6333" # REST API của Qdrant — hữu ích để tự kiểm tra qua http://localhost:6333/dashboard
+    volumes:
+      - qdrant_data:/qdrant/storage
+    restart: unless-stopped
+
+  api:
+    build:
+      context: ./backend
+      args:
+        # fashionclip (mặc định): image ~2 GB, cần ~1,5 GB RAM; simple: bộ mô phỏng, image nhỏ
+        ENCODER: ${ENCODER:-fashionclip}
+    environment:
+      STORE_BACKEND: qdrant
+      ENCODER: ${ENCODER:-fashionclip}  # phải khớp build arg ở trên
+      QDRANT_HOST: qdrant
+      QDRANT_PORT: "6333"
+      QDRANT_COLLECTION: stylelens_items
+      CORS_ORIGINS: "*"
+      # Đơn hàng + email nhận tin (SQLite) — nằm trong volume api_data để không mất khi
+      # container khởi động lại, giống dữ liệu Qdrant ở volume qdrant_data.
+      ORDERS_DB_PATH: /app/data/stylelens.sqlite3
+      # Đăng nhập quản trị (PB-10): đặt mật khẩu riêng khi triển khai, ví dụ
+      #   ADMIN_PASSWORD=mat-khau-rieng docker-compose up -d
+      # Không đặt thì dùng mật khẩu mặc định của bản demo (stylelens-admin, xem README).
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-stylelens-admin}
+      ADMIN_TOKEN_SECRET: ${ADMIN_TOKEN_SECRET:-}  # rỗng: sinh ngẫu nhiên mỗi lần khởi động
+    volumes:
+      - api_data:/app/data
+    depends_on:
+      - qdrant
+    ports:
+      - "8000:8000" # gọi trực tiếp API hoặc xem tài liệu Swagger tại http://localhost:8000/docs
+    restart: unless-stopped
+
+  web:
+    build: ./frontend
+    ports:
+      - "5173:80"
+    depends_on:
+      - api
+    restart: unless-stopped
+
+volumes:
+  qdrant_data:
+  api_data:

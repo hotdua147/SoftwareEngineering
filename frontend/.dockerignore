@@ -1,0 +1,7 @@
+# Không chép node_modules/dist của máy phát triển vào image: Dockerfile tự `npm install` bên
+# trong container (Linux). node_modules cài trên Windows/macOS có bản esbuild khác nền tảng —
+# nếu bị `COPY . .` ghi đè lên thì `npm run build` trong container sẽ lỗi.
+node_modules/
+dist/
+tests/
+*.log

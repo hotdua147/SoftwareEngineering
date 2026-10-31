@@ -1,0 +1,9 @@
+# Thư viện cho bộ mã hóa Fashion-CLIP thật (ENCODER=fashionclip, mặc định). Không cần khi chạy với
+# ENCODER=simple (bộ mô phỏng) hay khi chạy kiểm thử.
+#
+# PyTorch bản CPU nhẹ hơn nhiều bản mặc định (có CUDA) — cài trước:
+#   pip install torch --index-url https://download.pytorch.org/whl/cpu
+# rồi:
+#   pip install -r requirements-ml.txt
+torch>=2.2
+transformers>=4.40,<5
